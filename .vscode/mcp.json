@@ -1,0 +1,9 @@
+{
+    "servers": {
+        "mcp-lite": {
+            "type": "stdio",
+            "command": "bin/mcp",
+            "args": []
+        }
+    }
+}
