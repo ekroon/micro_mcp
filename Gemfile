@@ -2,7 +2,7 @@
 
 source "https://rubygems.org"
 
-# Specify your gem's dependencies in mcp_lite.gemspec
+# Specify your gem's dependencies in micro_mcp.gemspec
 gemspec
 
 gem "rake", "~> 13.0"

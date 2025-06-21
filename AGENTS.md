@@ -1,6 +1,6 @@
-# McpLite Agent Instructions
+# MicroMcp Agent Instructions
 
-McpLite is a Ruby gem with a Rust extension. It provides a simple way to build MCP servers that run over stdio. All Ruby sources are under `lib/`, while the Rust extension lives in `ext/mcp_lite`.
+MicroMcp is a Ruby gem with a Rust extension. It provides a simple way to build MCP servers that run over stdio. All Ruby sources are under `lib/`, while the Rust extension lives in `ext/micro_mcp`.
 
 ## Running checks
 

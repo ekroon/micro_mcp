@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
-module McpLite
+module MicroMcp
   module Server
     def self.start
       thread = Thread.new do
-        McpLiteNative.start_server
+        MicroMcpNative.start_server
       rescue => e
         warn "Error starting server: #{e.message}"
       end

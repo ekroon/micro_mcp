@@ -3,4 +3,4 @@
 require "mkmf"
 require "rb_sys/mkmf"
 
-create_rust_makefile("mcp_lite/mcp_lite")
+create_rust_makefile("micro_mcp/micro_mcp")

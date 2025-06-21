@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    mcp_lite (0.1.0)
+    micro_mcp (0.1.0)
       rb_sys (~> 0.9.91)
 
 GEM
@@ -66,7 +66,7 @@ PLATFORMS
   x86_64-darwin-23
 
 DEPENDENCIES
-  mcp_lite!
+  micro_mcp!
   minitest (~> 5.16)
   rake (~> 13.0)
   rake-compiler

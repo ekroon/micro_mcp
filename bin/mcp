@@ -2,10 +2,10 @@
 # frozen_string_literal: true
 
 require "bundler/setup"
-require "mcp_lite"
+require "micro_mcp"
 
 if ARGV.first
   require ARGV.shift
 end
 
-McpLite.start_server
+MicroMcp.start_server

@@ -3,5 +3,5 @@
 # in the ext/ directory.
 
 [workspace]
-members = ["./ext/mcp_lite"]
+members = ["./ext/micro_mcp"]
 resolver = "2"
