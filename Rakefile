@@ -11,16 +11,16 @@ require "rb_sys/extensiontask"
 
 task build: :compile
 
-GEMSPEC = Gem::Specification.load("mcp_lite.gemspec")
+GEMSPEC = Gem::Specification.load("micro_mcp.gemspec")
 
-RbSys::ExtensionTask.new("mcp_lite", GEMSPEC) do |ext|
-  ext.lib_dir = "lib/mcp_lite"
+RbSys::ExtensionTask.new("micro_mcp", GEMSPEC) do |ext|
+  ext.lib_dir = "lib/micro_mcp"
 end
 
 # Add Rust test task
 desc "Run Rust tests"
 task :test_rust do
-  Dir.chdir("ext/mcp_lite") do
+  Dir.chdir("ext/micro_mcp") do
     sh "cargo test --lib"
   end
 end
@@ -28,7 +28,7 @@ end
 # Add Rust lint task
 desc "Run Rust linting with clippy"
 task :lint_rust do
-  Dir.chdir("ext/mcp_lite") do
+  Dir.chdir("ext/micro_mcp") do
     sh "cargo clippy -- -D warnings"
   end
 end

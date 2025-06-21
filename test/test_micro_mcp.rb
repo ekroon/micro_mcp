@@ -2,9 +2,9 @@
 
 require "test_helper"
 
-class TestMcpLite < Minitest::Test
+class TestMicroMcp < Minitest::Test
   def test_that_it_has_a_version_number
-    refute_nil ::McpLite::VERSION
+    refute_nil ::MicroMcp::VERSION
   end
 
   def test_it_does_something_useful

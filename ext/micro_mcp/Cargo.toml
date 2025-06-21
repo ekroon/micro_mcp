@@ -1,5 +1,5 @@
 [package]
-name = "mcp_lite"
+name = "micro_mcp"
 version = "0.1.0"
 edition = "2021"
 authors = ["Erwin Kroon <123574+ekroon@users.noreply.github.com>"]

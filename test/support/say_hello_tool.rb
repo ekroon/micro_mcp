@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-McpLite::ToolRegistry.register_tool(
+MicroMcp::ToolRegistry.register_tool(
   name: "say_hello_world",
   description: "Prints 'Hello World!' message"
 ) do |_request|
