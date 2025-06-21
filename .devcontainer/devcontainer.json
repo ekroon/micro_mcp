@@ -21,11 +21,11 @@
       "extensions": [
         "rust-lang.rust-analyzer",
         "vadimcn.vscode-lldb",
-        "serayuzgur.crates",
         "tamasfe.even-better-toml",
         "usernamehw.errorlens",
         "rebornix.ruby",
-        "wingrunr21.vscode-ruby"
+        "wingrunr21.vscode-ruby",
+        "Catppuccin.catppuccin-vsc"
       ],
       "settings": {
         "rust-analyzer.cargo.features": "all",
