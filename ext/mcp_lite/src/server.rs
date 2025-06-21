@@ -8,58 +8,58 @@ use rust_mcp_sdk::{
     McpServer, StdioTransport, TransportOptions,
 };
 use tokio::runtime::Runtime;
-use serde::{Deserialize, Serialize};
 use async_trait::async_trait;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::collections::HashMap;
+
+use magnus::{block::Proc, Error, Ruby};
 
 use crate::utils::nogvl;
 
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
+type ToolHandler = RubyHandler;
+
+#[derive(Clone)]
+struct RubyHandler(Proc);
+
+// SAFETY: We only call the stored Proc while holding the GVL.
+unsafe impl Send for RubyHandler {}
+unsafe impl Sync for RubyHandler {}
+
 #[derive(Clone)]
 struct ToolEntry {
     tool: Tool,
-    handler: fn(CallToolRequest) -> Result<CallToolResult, CallToolError>,
+    handler: ToolHandler,
 }
 
-static TOOLS: OnceLock<HashMap<String, ToolEntry>> = OnceLock::new();
+static TOOLS: OnceLock<Mutex<HashMap<String, ToolEntry>>> = OnceLock::new();
 
-fn tools() -> &'static HashMap<String, ToolEntry> {
-    TOOLS.get_or_init(|| {
-        let mut map = HashMap::new();
-        map.insert(
-            SayHelloTool::tool_name(),
-            ToolEntry {
-                tool: SayHelloTool::tool(),
-                handler: say_hello_handler,
-            },
-        );
-        map
-    })
+fn tools() -> &'static Mutex<HashMap<String, ToolEntry>> {
+    TOOLS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn say_hello_handler(_: CallToolRequest) -> Result<CallToolResult, CallToolError> {
-    Ok(CallToolResult::text_content("Hello World!".to_string(), None))
+pub fn register_tool(_ruby: &Ruby, name: String, description: Option<String>, handler: Proc) -> Result<(), Error> {
+    let tool = Tool {
+        annotations: None,
+        description,
+        input_schema: ToolInputSchema::new(Vec::new(), None),
+        name: name.clone(),
+    };
+
+    let handler_fn = RubyHandler(handler);
+
+    let mut map = tools().lock().unwrap();
+    map.insert(
+        name,
+        ToolEntry {
+            tool,
+            handler: handler_fn,
+        },
+    );
+    Ok(())
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct SayHelloTool {}
-
-impl SayHelloTool {
-    pub fn tool_name() -> String {
-        "say_hello_world".to_string()
-    }
-
-    pub fn tool() -> Tool {
-        Tool {
-            annotations: None,
-            description: Some("Prints \"Hello World!\" message".to_string()),
-            input_schema: ToolInputSchema::new(Vec::new(), None),
-            name: Self::tool_name(),
-        }
-    }
-}
 
 pub struct MyServerHandler;
 
@@ -70,7 +70,10 @@ impl ServerHandler for MyServerHandler {
         _request: ListToolsRequest,
         _runtime: &dyn McpServer,
     ) -> Result<ListToolsResult, RpcError> {
-        let tools = tools().values().map(|t| t.tool.clone()).collect();
+        let tools = {
+            let map = tools().lock().unwrap();
+            map.values().map(|t| t.tool.clone()).collect()
+        };
         Ok(ListToolsResult {
             tools,
             meta: None,
@@ -83,8 +86,17 @@ impl ServerHandler for MyServerHandler {
         request: CallToolRequest,
         _runtime: &dyn McpServer,
     ) -> Result<CallToolResult, CallToolError> {
-        match tools().get(request.tool_name()) {
-            Some(entry) => (entry.handler)(request),
+        let map = tools().lock().unwrap();
+        match map.get(request.tool_name()) {
+            Some(entry) => {
+                let proc = entry.handler.0;
+                let text_result: Result<String, Error> =
+                    crate::utils::with_gvl(|| proc.call::<_, String>(()));
+                match text_result {
+                    Ok(text) => Ok(CallToolResult::text_content(text, None)),
+                    Err(e) => Err(CallToolError::new(std::io::Error::other(e.to_string()))),
+                }
+            }
             None => Err(CallToolError::unknown_tool(request.tool_name().to_string())),
         }
     }
@@ -140,8 +152,8 @@ mod tests {
             vec![
                 "-I".into(),
                 "../../lib".into(),
-                "-e".into(),
-                "require 'mcp_lite'; McpLite.start_server".into(),
+                "../../bin/mcp".into(),
+                "../../test/support/say_hello_tool.rb".into(),
             ],
             None,
             TransportOptions::default(),

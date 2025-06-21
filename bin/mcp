@@ -4,4 +4,8 @@
 require "bundler/setup"
 require "mcp_lite"
 
+if ARGV.first
+  require ARGV.shift
+end
+
 McpLite.start_server

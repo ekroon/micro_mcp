@@ -2,6 +2,7 @@
 
 require_relative "mcp_lite/version"
 require_relative "mcp_lite/mcp_lite"
+require_relative "mcp_lite/tool_registry"
 require_relative "mcp_lite/server"
 
 module McpLite
