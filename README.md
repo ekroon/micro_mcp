@@ -1,28 +1,50 @@
 # MicroMcp
 
-TODO: Delete this and the text below, and describe your gem
+MicroMcp is a tiny framework for building [MCP](https://github.com/openai/AIAPI-Protocol) servers in Ruby.  It ships with a Rust extension that handles the low level protocol while your Ruby code focuses on registering tools.
 
-Welcome to your new gem! In this directory, you'll find the files you need to be able to package up your Ruby library into a gem. Put your Ruby code in the file `lib/micro_mcp`. To experiment with that code, run `bin/console` for an interactive prompt.
+The gem is available on [RubyGems](https://rubygems.org/gems/micro_mcp).
+
+Put your Ruby sources under `lib/micro_mcp` and use `bin/console` for an interactive prompt when experimenting with the API.
 
 ## Installation
 
-TODO: Replace `UPDATE_WITH_YOUR_GEM_NAME_IMMEDIATELY_AFTER_RELEASE_TO_RUBYGEMS_ORG` with your gem name right after releasing it to RubyGems.org. Please do not do it earlier due to security reasons. Alternatively, replace this section with instructions to install your gem from git if you don't plan to release to RubyGems.org.
+Add the gem to your application's Gemfile:
 
-Install the gem and add to the application's Gemfile by executing:
-
-```bash
-bundle add UPDATE_WITH_YOUR_GEM_NAME_IMMEDIATELY_AFTER_RELEASE_TO_RUBYGEMS_ORG
+```ruby
+gem "micro_mcp"
 ```
 
-If bundler is not being used to manage dependencies, install the gem by executing:
+Then execute:
 
 ```bash
-gem install UPDATE_WITH_YOUR_GEM_NAME_IMMEDIATELY_AFTER_RELEASE_TO_RUBYGEMS_ORG
+bundle install
+```
+
+Or install it directly with RubyGems:
+
+```bash
+gem install micro_mcp
 ```
 
 ## Usage
 
-TODO: Write usage instructions here
+Define one or more tools and start the server:
+
+```ruby
+require "micro_mcp"
+
+MicroMcp::ToolRegistry.register_tool(name: "say_hello") do |_request|
+  "Hello World!"
+end
+
+MicroMcp.start_server
+```
+
+You can also run the bundled `bin/mcp` script and load a file containing your tool registrations:
+
+```bash
+bundle exec bin/mcp path/to/tools.rb
+```
 
 ## Development
 
