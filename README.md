@@ -4,8 +4,6 @@ MicroMcp is a tiny framework for building [MCP](https://github.com/openai/AIAPI-
 
 The gem is available on [RubyGems](https://rubygems.org/gems/micro_mcp).
 
-Put your Ruby sources under `lib/micro_mcp` and use `bin/console` for an interactive prompt when experimenting with the API.
-
 ## Installation
 
 Add the gem to your application's Gemfile:
@@ -55,12 +53,6 @@ end
 end
 
 MicroMcp.start_server
-```
-
-You can also run the bundled `bin/mcp` script and load a file containing your tool registrations:
-
-```bash
-bundle exec bin/mcp path/to/tools.rb
 ```
 
 ## Development
