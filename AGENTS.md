@@ -13,3 +13,6 @@ When features or important fixes are introduced, update `CHANGELOG.md` according
 - Install dependencies with `bin/setup` or `bundle install`.
 - Avoid committing build artifacts such as `target/` from Cargo.
 
+## Developing practices
+
+Always create a test to validate new features. It is ok to adapt tests for changes to existing features, unless those changes are big and don't invalidate standing assumptions.
