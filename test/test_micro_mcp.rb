@@ -31,8 +31,39 @@ class TestMicroMcp < Minitest::Test
       exit(0)
     end
 
-    # Give the server a moment to start
-    sleep(0.5)
+    # Wait for server to be ready instead of fixed sleep
+    timeout = 5.0
+    start_time = Time.now
+    server_ready = false
+
+    while (Time.now - start_time) < timeout
+      begin
+        # Check if process is still alive (not crashed during startup)
+        Process.kill(0, pid) # Signal 0 just checks if process exists
+        server_ready = true
+        break
+      rescue Errno::ESRCH
+        # Process doesn't exist yet or crashed
+        sleep(0.05)
+      end
+    end
+
+    unless server_ready
+      begin
+        Process.kill("KILL", pid)
+      rescue
+        nil
+      end
+      begin
+        Process.wait(pid)
+      rescue
+        nil
+      end
+      flunk "Server failed to start within timeout period"
+    end
+
+    # Give a small buffer for the server to fully initialize
+    sleep(0.1)
 
     # Send interrupt signal
     Process.kill("INT", pid)
