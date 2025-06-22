@@ -7,7 +7,7 @@ end
 MicroMcp::ToolRegistry.register_tool(
   name: "capture_runtime",
   description: "captures runtime"
-) do |runtime|
+) do |_args, runtime|
   RuntimeStore.captured_runtime = runtime
   runtime.is_initialized.to_s
 end
@@ -15,6 +15,6 @@ end
 MicroMcp::ToolRegistry.register_tool(
   name: "use_captured_runtime",
   description: "uses captured runtime"
-) do |_|
+) do |_args, _runtime|
   RuntimeStore.captured_runtime.is_initialized.to_s
 end

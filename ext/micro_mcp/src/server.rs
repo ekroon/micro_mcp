@@ -8,11 +8,12 @@ use rust_mcp_sdk::{
     },
     McpServer, StdioTransport, TransportOptions,
 };
+use serde_json::{Map as JsonMap, Value as JsonValue};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use tokio::runtime::Runtime;
 
-use magnus::{block::Proc, Error, Ruby};
+use magnus::{block::Proc, value::ReprValue, Error, Ruby, Value};
 use magnus::{typed_data::DataTypeFunctions, TypedData};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -40,6 +41,53 @@ static TOOLS: OnceLock<Mutex<HashMap<String, ToolEntry>>> = OnceLock::new();
 
 fn tools() -> &'static Mutex<HashMap<String, ToolEntry>> {
     TOOLS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn ruby_value_to_json_value(ruby: &Ruby, val: Value) -> Result<JsonValue, Error> {
+    let json_str: String = magnus::eval!(ruby, "require 'json'; JSON.generate(obj)", obj = val)?;
+    serde_json::from_str(&json_str)
+        .map_err(|e| Error::new(ruby.exception_runtime_error(), e.to_string()))
+}
+
+fn json_value_to_ruby_value(ruby: &Ruby, val: &JsonValue) -> Result<Value, Error> {
+    let json_str = serde_json::to_string(val)
+        .map_err(|e| Error::new(ruby.exception_runtime_error(), e.to_string()))?;
+    Ok(magnus::eval!(
+        ruby,
+        "require 'json'; JSON.parse(str)",
+        str = json_str
+    )?)
+}
+
+fn parse_tool_input_schema(json: JsonValue) -> ToolInputSchema {
+    if let JsonValue::Object(obj) = json {
+        let required = obj
+            .get("required")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let properties = obj
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .map(|props| {
+                props
+                    .iter()
+                    .filter_map(|(k, v)| match v {
+                        JsonValue::Object(map) => Some((k.clone(), map.clone())),
+                        _ => None,
+                    })
+                    .collect::<HashMap<String, JsonMap<String, JsonValue>>>()
+            });
+
+        ToolInputSchema::new(required, properties)
+    } else {
+        ToolInputSchema::new(Vec::new(), None)
+    }
 }
 
 #[derive(Clone, TypedData)]
@@ -86,12 +134,21 @@ pub fn register_tool(
     ruby: &Ruby,
     name: String,
     description: Option<String>,
+    arg_schema: Option<Value>,
     handler: Proc,
 ) -> Result<(), Error> {
+    let schema = match arg_schema {
+        Some(val) => {
+            let json = ruby_value_to_json_value(ruby, val)?;
+            parse_tool_input_schema(json)
+        }
+        None => ToolInputSchema::new(Vec::new(), None),
+    };
+
     let tool = Tool {
         annotations: None,
         description,
-        input_schema: ToolInputSchema::new(Vec::new(), None),
+        input_schema: schema,
         name: name.clone(),
     };
 
@@ -144,8 +201,25 @@ impl ServerHandler for MyServerHandler {
             Some(entry) => {
                 let proc = entry.handler.0;
                 let wrapper = RubyMcpServer::new(runtime);
-                let text_result: Result<String, Error> =
-                    crate::utils::with_gvl(|| proc.call::<_, String>((wrapper.clone(),)));
+                let args_value = if let Some(map) = &request.params.arguments {
+                    let json = JsonValue::Object(map.clone());
+                    Some(
+                        crate::utils::with_gvl(|| {
+                            let ruby = Ruby::get().unwrap();
+                            json_value_to_ruby_value(&ruby, &json)
+                        })
+                        .map_err(|e: Error| {
+                            CallToolError::new(std::io::Error::other(e.to_string()))
+                        })?,
+                    )
+                } else {
+                    None
+                };
+                let text_result: Result<String, Error> = crate::utils::with_gvl(|| {
+                    let ruby = Ruby::get().unwrap();
+                    let args = args_value.unwrap_or_else(|| ruby.qnil().as_value());
+                    proc.call::<_, String>((args, wrapper.clone()))
+                });
                 wrapper.invalidate();
                 match text_result {
                     Ok(text) => Ok(CallToolResult::text_content(text, None)),
@@ -199,6 +273,7 @@ mod tests {
         },
         McpClient, StdioTransport, TransportOptions,
     };
+    use serde_json::json;
 
     struct TestClientHandler;
     #[async_trait]
@@ -245,6 +320,62 @@ mod tests {
             .await?;
         let text = result.content[0].as_text_content()?.text.clone();
         assert_eq!(text, "Hello World!");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn tools_with_arguments_work() -> SdkResult<()> {
+        let transport = StdioTransport::create_with_server_launch(
+            "ruby",
+            vec![
+                "-I".into(),
+                "../../lib".into(),
+                "../../bin/mcp".into(),
+                "../../test/support/argument_tools.rb".into(),
+            ],
+            None,
+            TransportOptions::default(),
+        )?;
+
+        let client_details = InitializeRequestParams {
+            capabilities: ClientCapabilities::default(),
+            client_info: Implementation {
+                name: "test-client".into(),
+                version: "0.1.0".into(),
+            },
+            protocol_version: LATEST_PROTOCOL_VERSION.into(),
+        };
+
+        let client = client_runtime::create_client(client_details, transport, TestClientHandler);
+
+        client.clone().start().await?;
+
+        let tools = client.list_tools(None).await?;
+        assert_eq!(tools.tools.len(), 2);
+        assert!(tools.tools.iter().any(|t| t.name == "add_numbers"));
+        assert!(tools.tools.iter().any(|t| t.name == "echo_message"));
+
+        let result = client
+            .call_tool(CallToolRequestParams {
+                name: "add_numbers".into(),
+                arguments: Some(
+                    [("a".to_string(), json!(5)), ("b".to_string(), json!(7))]
+                        .into_iter()
+                        .collect(),
+                ),
+            })
+            .await?;
+        let text = result.content[0].as_text_content()?.text.clone();
+        assert_eq!(text, "12");
+
+        let result = client
+            .call_tool(CallToolRequestParams {
+                name: "echo_message".into(),
+                arguments: Some([("message".to_string(), json!("hi"))].into_iter().collect()),
+            })
+            .await?;
+        let text = result.content[0].as_text_content()?.text.clone();
+        assert_eq!(text, "hi");
         Ok(())
     }
 
