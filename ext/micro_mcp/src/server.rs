@@ -40,7 +40,7 @@ fn tools() -> &'static Mutex<HashMap<String, ToolEntry>> {
 }
 
 pub fn register_tool(
-    _ruby: &Ruby,
+    ruby: &Ruby,
     name: String,
     description: Option<String>,
     handler: Proc,
@@ -54,7 +54,9 @@ pub fn register_tool(
 
     let handler_fn = RubyHandler(handler);
 
-    let mut map = tools().lock().unwrap();
+    let mut map = tools()
+        .lock()
+        .map_err(|_| Error::new(ruby.exception_runtime_error(), "tools mutex poisoned"))?;
     map.insert(
         name,
         ToolEntry {
@@ -75,7 +77,9 @@ impl ServerHandler for MyServerHandler {
         _runtime: &dyn McpServer,
     ) -> Result<ListToolsResult, RpcError> {
         let tools = {
-            let map = tools().lock().unwrap();
+            let map = tools().lock().map_err(|_| {
+                RpcError::internal_error().with_message("tools mutex poisoned".to_string())
+            })?;
             map.values().map(|t| t.tool.clone()).collect()
         };
         Ok(ListToolsResult {
@@ -90,7 +94,9 @@ impl ServerHandler for MyServerHandler {
         request: CallToolRequest,
         _runtime: &dyn McpServer,
     ) -> Result<CallToolResult, CallToolError> {
-        let map = tools().lock().unwrap();
+        let map = tools()
+            .lock()
+            .map_err(|_| CallToolError::new(std::io::Error::other("tools mutex poisoned")))?;
         match map.get(request.tool_name()) {
             Some(entry) => {
                 let proc = entry.handler.0;
@@ -153,8 +159,10 @@ mod tests {
     #[async_trait]
     impl rust_mcp_sdk::mcp_client::ClientHandler for TestClientHandler {}
 
+    use rust_mcp_sdk::error::SdkResult;
+
     #[tokio::test]
-    async fn hello_world_tool_works() {
+    async fn hello_world_tool_works() -> SdkResult<()> {
         let transport = StdioTransport::create_with_server_launch(
             "ruby",
             vec![
@@ -165,8 +173,7 @@ mod tests {
             ],
             None,
             TransportOptions::default(),
-        )
-        .unwrap();
+        )?;
 
         let client_details = InitializeRequestParams {
             capabilities: ClientCapabilities::default(),
@@ -179,9 +186,9 @@ mod tests {
 
         let client = client_runtime::create_client(client_details, transport, TestClientHandler);
 
-        client.clone().start().await.unwrap();
+        client.clone().start().await?;
 
-        let tools = client.list_tools(None).await.unwrap();
+        let tools = client.list_tools(None).await?;
         assert_eq!(tools.tools.len(), 1);
         assert_eq!(tools.tools[0].name, "say_hello_world");
 
@@ -190,9 +197,9 @@ mod tests {
                 name: "say_hello_world".into(),
                 arguments: None,
             })
-            .await
-            .unwrap();
-        let text = result.content[0].as_text_content().unwrap().text.clone();
+            .await?;
+        let text = result.content[0].as_text_content()?.text.clone();
         assert_eq!(text, "Hello World!");
+        Ok(())
     }
 }
