@@ -128,6 +128,10 @@ impl<'a> RubyMcpServer<'a> {
     pub fn is_initialized(&self) -> Result<bool, Error> {
         Ok(self.runtime()?.is_initialized())
     }
+
+    pub fn client_supports_sampling(&self) -> Result<Option<bool>, Error> {
+        Ok(self.runtime()?.client_supports_sampling())
+    }
 }
 
 pub fn register_tool(
@@ -429,6 +433,45 @@ mod tests {
         assert!(result.is_error.unwrap_or(false));
         let text = result.content[0].as_text_content()?.text.clone();
         assert!(text.contains("McpServer reference"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn client_supports_sampling_exposed() -> SdkResult<()> {
+        let transport = StdioTransport::create_with_server_launch(
+            "ruby",
+            vec![
+                "-I".into(),
+                "../../lib".into(),
+                "../../bin/mcp".into(),
+                "../../test/support/client_capabilities_tool.rb".into(),
+            ],
+            None,
+            TransportOptions::default(),
+        )?;
+
+        let client_details = InitializeRequestParams {
+            capabilities: ClientCapabilities::default(),
+            client_info: Implementation {
+                name: "test-client".into(),
+                version: "0.1.0".into(),
+            },
+            protocol_version: LATEST_PROTOCOL_VERSION.into(),
+        };
+
+        let client = client_runtime::create_client(client_details, transport, TestClientHandler);
+
+        client.clone().start().await?;
+
+        let result = client
+            .call_tool(CallToolRequestParams {
+                name: "client_sampling_supported".into(),
+                arguments: None,
+            })
+            .await?;
+        let text = result.content[0].as_text_content()?.text.clone();
+        assert_eq!(text, "false");
 
         Ok(())
     }
