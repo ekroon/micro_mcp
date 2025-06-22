@@ -165,7 +165,7 @@ impl ServerHandler for MyServerHandler {
                 let text_result: Result<String, Error> = crate::utils::with_gvl(|| {
                     let ruby = Ruby::get().unwrap();
                     let runtime_val = ruby.obj_wrap(RuntimeHandle::new(runtime));
-                    proc.call::<_, String>((ruby.qnil(), runtime_val))
+                    proc.call::<_, String>((runtime_val,))
                 });
                 match text_result {
                     Ok(text) => Ok(CallToolResult::text_content(text, None)),
