@@ -1,16 +1,16 @@
+use async_trait::async_trait;
 use rust_mcp_sdk::{
     mcp_server::{server_runtime, ServerHandler, ServerRuntime},
     schema::{
         schema_utils::CallToolError, CallToolRequest, CallToolResult, Implementation,
         InitializeResult, ListToolsRequest, ListToolsResult, RpcError, ServerCapabilities,
-        ServerCapabilitiesTools, LATEST_PROTOCOL_VERSION, Tool, ToolInputSchema,
+        ServerCapabilitiesTools, Tool, ToolInputSchema, LATEST_PROTOCOL_VERSION,
     },
     McpServer, StdioTransport, TransportOptions,
 };
-use tokio::runtime::Runtime;
-use async_trait::async_trait;
-use std::sync::{Mutex, OnceLock};
 use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use tokio::runtime::Runtime;
 
 use magnus::{block::Proc, Error, Ruby};
 
@@ -39,7 +39,12 @@ fn tools() -> &'static Mutex<HashMap<String, ToolEntry>> {
     TOOLS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-pub fn register_tool(_ruby: &Ruby, name: String, description: Option<String>, handler: Proc) -> Result<(), Error> {
+pub fn register_tool(
+    ruby: &Ruby,
+    name: String,
+    description: Option<String>,
+    handler: Proc,
+) -> Result<(), Error> {
     let tool = Tool {
         annotations: None,
         description,
@@ -49,7 +54,9 @@ pub fn register_tool(_ruby: &Ruby, name: String, description: Option<String>, ha
 
     let handler_fn = RubyHandler(handler);
 
-    let mut map = tools().lock().unwrap();
+    let mut map = tools()
+        .lock()
+        .map_err(|_| Error::new(ruby.exception_runtime_error(), "tools mutex poisoned"))?;
     map.insert(
         name,
         ToolEntry {
@@ -59,7 +66,6 @@ pub fn register_tool(_ruby: &Ruby, name: String, description: Option<String>, ha
     );
     Ok(())
 }
-
 
 pub struct MyServerHandler;
 
@@ -71,7 +77,9 @@ impl ServerHandler for MyServerHandler {
         _runtime: &dyn McpServer,
     ) -> Result<ListToolsResult, RpcError> {
         let tools = {
-            let map = tools().lock().unwrap();
+            let map = tools().lock().map_err(|_| {
+                RpcError::internal_error().with_message("tools mutex poisoned".to_string())
+            })?;
             map.values().map(|t| t.tool.clone()).collect()
         };
         Ok(ListToolsResult {
@@ -86,7 +94,9 @@ impl ServerHandler for MyServerHandler {
         request: CallToolRequest,
         _runtime: &dyn McpServer,
     ) -> Result<CallToolResult, CallToolError> {
-        let map = tools().lock().unwrap();
+        let map = tools()
+            .lock()
+            .map_err(|_| CallToolError::new(std::io::Error::other("tools mutex poisoned")))?;
         match map.get(request.tool_name()) {
             Some(entry) => {
                 let proc = entry.handler.0;
@@ -103,50 +113,56 @@ impl ServerHandler for MyServerHandler {
 }
 
 pub fn start_server() -> String {
-    let runtime = RUNTIME
-        .get_or_init(|| Runtime::new().expect("Failed to create Tokio runtime"));
+    let runtime = RUNTIME.get_or_init(|| Runtime::new().expect("Failed to create Tokio runtime"));
 
-    let _ = nogvl(|| runtime.block_on(async {
-        let server_details = InitializeResult {
-            server_info: Implementation {
-                name: "Hello World MCP Server".to_string(),
-                version: "0.1.0".to_string(),
-            },
-            capabilities: ServerCapabilities {
-                tools: Some(ServerCapabilitiesTools { list_changed: None }),
-                ..Default::default()
-            },
-            meta: None,
-            instructions: Some("server instructions...".to_string()),
-            protocol_version: LATEST_PROTOCOL_VERSION.to_string(),
-        };
+    let _ = nogvl(|| {
+        runtime.block_on(async {
+            let server_details = InitializeResult {
+                server_info: Implementation {
+                    name: "Hello World MCP Server".to_string(),
+                    version: "0.1.0".to_string(),
+                },
+                capabilities: ServerCapabilities {
+                    tools: Some(ServerCapabilitiesTools { list_changed: None }),
+                    ..Default::default()
+                },
+                meta: None,
+                instructions: Some("server instructions...".to_string()),
+                protocol_version: LATEST_PROTOCOL_VERSION.to_string(),
+            };
 
-        let handler = MyServerHandler {};
-        let transport = StdioTransport::new(TransportOptions::default())?;
-        let server: ServerRuntime =
-            server_runtime::create_server(server_details, transport, handler);
+            let handler = MyServerHandler {};
+            let transport = StdioTransport::new(TransportOptions::default())?;
+            let server: ServerRuntime =
+                server_runtime::create_server(server_details, transport, handler);
 
-        server.start().await
-    }));
+            server.start().await
+        })
+    });
 
     "Ok".into()
 }
 
 #[cfg(test)]
 mod tests {
+    use async_trait::async_trait;
     use rust_mcp_sdk::{
         mcp_client::client_runtime,
-        schema::{CallToolRequestParams, ClientCapabilities, Implementation, InitializeRequestParams, LATEST_PROTOCOL_VERSION},
+        schema::{
+            CallToolRequestParams, ClientCapabilities, Implementation, InitializeRequestParams,
+            LATEST_PROTOCOL_VERSION,
+        },
         McpClient, StdioTransport, TransportOptions,
     };
-    use async_trait::async_trait;
 
     struct TestClientHandler;
     #[async_trait]
     impl rust_mcp_sdk::mcp_client::ClientHandler for TestClientHandler {}
 
+    use rust_mcp_sdk::error::SdkResult;
+
     #[tokio::test]
-    async fn hello_world_tool_works() {
+    async fn hello_world_tool_works() -> SdkResult<()> {
         let transport = StdioTransport::create_with_server_launch(
             "ruby",
             vec![
@@ -157,8 +173,7 @@ mod tests {
             ],
             None,
             TransportOptions::default(),
-        )
-        .unwrap();
+        )?;
 
         let client_details = InitializeRequestParams {
             capabilities: ClientCapabilities::default(),
@@ -171,18 +186,20 @@ mod tests {
 
         let client = client_runtime::create_client(client_details, transport, TestClientHandler);
 
-        client.clone().start().await.unwrap();
+        client.clone().start().await?;
 
-        let tools = client.list_tools(None).await.unwrap();
+        let tools = client.list_tools(None).await?;
         assert_eq!(tools.tools.len(), 1);
         assert_eq!(tools.tools[0].name, "say_hello_world");
 
         let result = client
-            .call_tool(CallToolRequestParams { name: "say_hello_world".into(), arguments: None })
-            .await
-            .unwrap();
-        let text = result.content[0].as_text_content().unwrap().text.clone();
+            .call_tool(CallToolRequestParams {
+                name: "say_hello_world".into(),
+                arguments: None,
+            })
+            .await?;
+        let text = result.content[0].as_text_content()?.text.clone();
         assert_eq!(text, "Hello World!");
+        Ok(())
     }
 }
-
