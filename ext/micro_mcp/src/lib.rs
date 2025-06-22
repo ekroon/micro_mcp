@@ -1,12 +1,19 @@
 mod server;
 mod utils;
 
-use magnus::{function, prelude::*, Error, Ruby};
+use magnus::{function, method, prelude::*, Error, Ruby};
 
 #[magnus::init]
 fn init(ruby: &Ruby) -> Result<(), Error> {
-    let module = ruby.define_module("MicroMcpNative")?;
-    module.define_singleton_method("start_server", function!(server::start_server, 0))?;
-    module.define_singleton_method("register_tool", function!(server::register_tool, 3))?;
+    let native = ruby.define_module("MicroMcpNative")?;
+    native.define_singleton_method("start_server", function!(server::start_server, 0))?;
+    native.define_singleton_method("register_tool", function!(server::register_tool, 3))?;
+
+    let parent = ruby.define_module("MicroMcp")?;
+    let class = parent.define_class("Runtime", ruby.class_object())?;
+    class.define_method(
+        "is_initialized",
+        method!(server::RubyMcpServer::is_initialized, 0),
+    )?;
     Ok(())
 }
