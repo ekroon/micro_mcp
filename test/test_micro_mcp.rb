@@ -7,6 +7,10 @@ class TestMicroMcp < Minitest::Test
     refute_nil ::MicroMcp::VERSION
   end
 
+  def test_runtime_exposes_create_message
+    assert_includes MicroMcp::Runtime.instance_methods(false), :create_message
+  end
+
   def test_it_does_something_useful
     assert true
   end

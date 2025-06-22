@@ -138,6 +138,31 @@ impl<'a> RubyMcpServer<'a> {
     pub fn client_supports_sampling(&self) -> Result<Option<bool>, Error> {
         Ok(self.runtime()?.client_supports_sampling())
     }
+
+    pub fn create_message(&self, params: Value) -> Result<Value, Error> {
+        let ruby = Ruby::get().unwrap();
+        let runtime = self.runtime()?;
+        let json_value = ruby_value_to_json_value(&ruby, params)?;
+        let request_params: rust_mcp_sdk::schema::CreateMessageRequestParams =
+            serde_json::from_value(json_value)
+                .map_err(|e| Error::new(ruby.exception_runtime_error(), e.to_string()))?;
+
+        let runtime_handle = RUNTIME.get().expect("Tokio not initialised");
+        let handle = runtime_handle.handle();
+
+        let result = if tokio::runtime::Handle::try_current().is_ok() {
+            tokio::task::block_in_place(|| {
+                handle.block_on(async { runtime.create_message(request_params).await })
+            })
+        } else {
+            handle.block_on(async { runtime.create_message(request_params).await })
+        }
+        .map_err(|e| Error::new(ruby.exception_runtime_error(), e.to_string()))?;
+
+        let json_result = serde_json::to_value(result)
+            .map_err(|e| Error::new(ruby.exception_runtime_error(), e.to_string()))?;
+        json_value_to_ruby_value(&ruby, &json_result)
+    }
 }
 
 pub fn register_tool(

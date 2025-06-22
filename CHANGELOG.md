@@ -5,6 +5,7 @@
 - Access to the MCP runtime from Ruby tools
 - Argument support for tools
 - Exposed `client_supports_sampling` on runtime
+- Exposed `create_message` on runtime
 
 ### Changed
 - Gem renamed from `mcp_lite` to `micro_mcp`

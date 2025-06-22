@@ -20,5 +20,9 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         "client_supports_sampling",
         method!(server::RubyMcpServer::client_supports_sampling, 0),
     )?;
+    class.define_method(
+        "create_message",
+        method!(server::RubyMcpServer::create_message, 1),
+    )?;
     Ok(())
 }
