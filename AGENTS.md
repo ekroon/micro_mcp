@@ -5,6 +5,7 @@ MicroMcp is a Ruby gem with a Rust extension. It provides a simple way to build 
 ## Running checks
 
 Always run `bundle exec rake` before committing. This command compiles the extension, runs Ruby and Rust tests, and lints the code with StandardRB and clippy. Additionally, run `cargo fmt --all` to keep the Rust code formatted consistently.
+When features or important fixes are introduced, update `CHANGELOG.md` accordingly.
 
 ## Development tips
 
