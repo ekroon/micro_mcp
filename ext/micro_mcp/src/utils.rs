@@ -1,5 +1,5 @@
-use std::{ffi::c_void, mem::MaybeUninit, ptr::null_mut};
 use rb_sys::{rb_thread_call_with_gvl, rb_thread_call_without_gvl};
+use std::{ffi::c_void, mem::MaybeUninit, ptr::null_mut};
 
 unsafe extern "C" fn call_without_gvl<F, R>(arg: *mut c_void) -> *mut c_void
 where
