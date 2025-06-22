@@ -12,7 +12,8 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use tokio::runtime::Runtime;
 
-use magnus::{block::Proc, Error, Ruby};
+use magnus::{block::Proc, Error, Module, RModule, Ruby};
+use std::mem;
 
 use crate::utils::nogvl;
 
@@ -34,6 +35,67 @@ struct ToolEntry {
 }
 
 static TOOLS: OnceLock<Mutex<HashMap<String, ToolEntry>>> = OnceLock::new();
+
+#[derive(Clone, Copy)]
+#[magnus::wrap(class = "MicroMcpNative::Runtime", free_immediately)]
+struct RuntimeHandle(*const dyn McpServer);
+
+unsafe impl Send for RuntimeHandle {}
+unsafe impl Sync for RuntimeHandle {}
+
+impl RuntimeHandle {
+    fn new(runtime: &dyn McpServer) -> Self {
+        let static_rt: &'static dyn McpServer = unsafe { mem::transmute(runtime) };
+        Self(static_rt as *const dyn McpServer)
+    }
+
+    fn runtime(&self) -> &dyn McpServer {
+        unsafe { &*self.0 }
+    }
+
+    fn sample_bang(&self, params_json: String) -> Result<String, Error> {
+        if !self.sampling_supported() {
+            return Err(Error::new(
+                Ruby::get().unwrap().exception_runtime_error(),
+                "Client does not support sampling",
+            ));
+        }
+
+        let params: rust_mcp_sdk::schema::CreateMessageRequestParams =
+            serde_json::from_str(&params_json).map_err(|e| {
+                Error::new(
+                    Ruby::get().unwrap().exception_runtime_error(),
+                    e.to_string(),
+                )
+            })?;
+        let fut = self.runtime().create_message(params);
+        let res = RUNTIME
+            .get()
+            .expect("runtime not initialized")
+            .block_on(fut);
+        match res {
+            Ok(r) => Ok(serde_json::to_string(&r).unwrap()),
+            Err(e) => Err(Error::new(
+                Ruby::get().unwrap().exception_runtime_error(),
+                e.to_string(),
+            )),
+        }
+    }
+
+    fn sampling_supported(&self) -> bool {
+        self.runtime().client_supports_sampling().unwrap_or(false)
+    }
+}
+
+pub fn init_ruby(ruby: &Ruby, module: RModule) -> Result<(), Error> {
+    let class = module.define_class("Runtime", ruby.class_object())?;
+    class.define_method("sample!", magnus::method!(RuntimeHandle::sample_bang, 1))?;
+    class.define_method(
+        "sampling_supported?",
+        magnus::method!(RuntimeHandle::sampling_supported, 0),
+    )?;
+    Ok(())
+}
 
 fn tools() -> &'static Mutex<HashMap<String, ToolEntry>> {
     TOOLS.get_or_init(|| Mutex::new(HashMap::new()))
@@ -92,7 +154,7 @@ impl ServerHandler for MyServerHandler {
     async fn handle_call_tool_request(
         &self,
         request: CallToolRequest,
-        _runtime: &dyn McpServer,
+        runtime: &dyn McpServer,
     ) -> Result<CallToolResult, CallToolError> {
         let map = tools()
             .lock()
@@ -100,8 +162,11 @@ impl ServerHandler for MyServerHandler {
         match map.get(request.tool_name()) {
             Some(entry) => {
                 let proc = entry.handler.0;
-                let text_result: Result<String, Error> =
-                    crate::utils::with_gvl(|| proc.call::<_, String>(()));
+                let text_result: Result<String, Error> = crate::utils::with_gvl(|| {
+                    let ruby = Ruby::get().unwrap();
+                    let runtime_val = ruby.obj_wrap(RuntimeHandle::new(runtime));
+                    proc.call::<_, String>((ruby.qnil(), runtime_val))
+                });
                 match text_result {
                     Ok(text) => Ok(CallToolResult::text_content(text, None)),
                     Err(e) => Err(CallToolError::new(std::io::Error::other(e.to_string()))),
@@ -200,6 +265,47 @@ mod tests {
             .await?;
         let text = result.content[0].as_text_content()?.text.clone();
         assert_eq!(text, "Hello World!");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sample_tool_fails_without_llm() -> SdkResult<()> {
+        let transport = StdioTransport::create_with_server_launch(
+            "ruby",
+            vec![
+                "-I".into(),
+                "../../lib".into(),
+                "../../bin/mcp".into(),
+                "../../test/support/say_hello_random_language_tool.rb".into(),
+            ],
+            None,
+            TransportOptions::default(),
+        )?;
+
+        let client_details = InitializeRequestParams {
+            capabilities: ClientCapabilities::default(),
+            client_info: Implementation {
+                name: "test-client".into(),
+                version: "0.1.0".into(),
+            },
+            protocol_version: LATEST_PROTOCOL_VERSION.into(),
+        };
+
+        let client = client_runtime::create_client(client_details, transport, TestClientHandler);
+
+        client.clone().start().await?;
+
+        let tools = client.list_tools(None).await?;
+        assert_eq!(tools.tools.len(), 1);
+        assert_eq!(tools.tools[0].name, "say_hello_random_language");
+
+        let result = client
+            .call_tool(CallToolRequestParams {
+                name: "say_hello_random_language".into(),
+                arguments: None,
+            })
+            .await?;
+        assert!(result.is_error.unwrap_or(false));
         Ok(())
     }
 }
