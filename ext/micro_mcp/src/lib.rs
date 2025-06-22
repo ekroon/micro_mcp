@@ -15,5 +15,9 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         "is_initialized",
         method!(server::RubyMcpServer::is_initialized, 0),
     )?;
+    class.define_method(
+        "client_supports_sampling",
+        method!(server::RubyMcpServer::client_supports_sampling, 0),
+    )?;
     Ok(())
 }
