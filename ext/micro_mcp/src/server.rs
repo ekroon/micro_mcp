@@ -13,6 +13,9 @@ use std::sync::{Mutex, OnceLock};
 use tokio::runtime::Runtime;
 
 use magnus::{block::Proc, Error, Ruby};
+use magnus::{typed_data::DataTypeFunctions, TypedData};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use crate::utils::nogvl;
 
@@ -37,6 +40,46 @@ static TOOLS: OnceLock<Mutex<HashMap<String, ToolEntry>>> = OnceLock::new();
 
 fn tools() -> &'static Mutex<HashMap<String, ToolEntry>> {
     TOOLS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[derive(Clone, TypedData)]
+#[magnus(class = "MicroMcp::Runtime", free_immediately, unsafe_generics)]
+pub struct RubyMcpServer<'a> {
+    inner: Rc<RefCell<Option<&'a dyn McpServer>>>,
+}
+
+impl<'a> DataTypeFunctions for RubyMcpServer<'a> {}
+
+// SAFETY: the wrapped reference is only used while valid
+unsafe impl<'a> Send for RubyMcpServer<'a> {}
+
+impl<'a> RubyMcpServer<'a> {
+    fn new(runtime: &'a dyn McpServer) -> Self {
+        Self {
+            inner: Rc::new(RefCell::new(Some(runtime))),
+        }
+    }
+
+    fn invalidate(&self) {
+        *self.inner.borrow_mut() = None;
+    }
+
+    fn runtime(&self) -> Result<&'a dyn McpServer, Error> {
+        match *self.inner.borrow() {
+            Some(ptr) => Ok(ptr),
+            None => {
+                let ruby = Ruby::get().unwrap();
+                Err(Error::new(
+                    ruby.exception_runtime_error(),
+                    "McpServer reference is no longer valid",
+                ))
+            }
+        }
+    }
+
+    pub fn is_initialized(&self) -> Result<bool, Error> {
+        Ok(self.runtime()?.is_initialized())
+    }
 }
 
 pub fn register_tool(
@@ -92,7 +135,7 @@ impl ServerHandler for MyServerHandler {
     async fn handle_call_tool_request(
         &self,
         request: CallToolRequest,
-        _runtime: &dyn McpServer,
+        runtime: &dyn McpServer,
     ) -> Result<CallToolResult, CallToolError> {
         let map = tools()
             .lock()
@@ -100,8 +143,10 @@ impl ServerHandler for MyServerHandler {
         match map.get(request.tool_name()) {
             Some(entry) => {
                 let proc = entry.handler.0;
+                let wrapper = RubyMcpServer::new(runtime);
                 let text_result: Result<String, Error> =
-                    crate::utils::with_gvl(|| proc.call::<_, String>(()));
+                    crate::utils::with_gvl(|| proc.call::<_, String>((wrapper.clone(),)));
+                wrapper.invalidate();
                 match text_result {
                     Ok(text) => Ok(CallToolResult::text_content(text, None)),
                     Err(e) => Err(CallToolError::new(std::io::Error::other(e.to_string()))),
@@ -200,6 +245,60 @@ mod tests {
             .await?;
         let text = result.content[0].as_text_content()?.text.clone();
         assert_eq!(text, "Hello World!");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn runtime_lifetime_enforced() -> SdkResult<()> {
+        let transport = StdioTransport::create_with_server_launch(
+            "ruby",
+            vec![
+                "-I".into(),
+                "../../lib".into(),
+                "../../bin/mcp".into(),
+                "../../test/support/runtime_lifetime_tool.rb".into(),
+            ],
+            None,
+            TransportOptions::default(),
+        )?;
+
+        let client_details = InitializeRequestParams {
+            capabilities: ClientCapabilities::default(),
+            client_info: Implementation {
+                name: "test-client".into(),
+                version: "0.1.0".into(),
+            },
+            protocol_version: LATEST_PROTOCOL_VERSION.into(),
+        };
+
+        let client = client_runtime::create_client(client_details, transport, TestClientHandler);
+
+        client.clone().start().await?;
+
+        let tools = client.list_tools(None).await?;
+        assert_eq!(tools.tools.len(), 2);
+
+        // first call stores the runtime
+        let result = client
+            .call_tool(CallToolRequestParams {
+                name: "capture_runtime".into(),
+                arguments: None,
+            })
+            .await?;
+        let text = result.content[0].as_text_content()?.text.clone();
+        assert_eq!(text, "true");
+
+        // second call should fail as runtime was invalidated
+        let result = client
+            .call_tool(CallToolRequestParams {
+                name: "use_captured_runtime".into(),
+                arguments: None,
+            })
+            .await?;
+        assert!(result.is_error.unwrap_or(false));
+        let text = result.content[0].as_text_content()?.text.clone();
+        assert!(text.contains("McpServer reference"));
+
         Ok(())
     }
 }
