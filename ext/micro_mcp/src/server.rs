@@ -10,7 +10,8 @@ use rust_mcp_sdk::{
 };
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use tokio::runtime::Runtime;
 
 use magnus::{block::Proc, value::ReprValue, Error, Ruby, Value};
@@ -21,6 +22,11 @@ use std::rc::Rc;
 use crate::utils::nogvl;
 
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
+static SHUTDOWN_FLAG: OnceLock<Arc<AtomicBool>> = OnceLock::new();
+
+fn shutdown_flag() -> &'static Arc<AtomicBool> {
+    SHUTDOWN_FLAG.get_or_init(|| Arc::new(AtomicBool::new(false)))
+}
 
 type ToolHandler = RubyHandler;
 
@@ -238,6 +244,9 @@ impl ServerHandler for MyServerHandler {
 pub fn start_server() -> String {
     let runtime = RUNTIME.get_or_init(|| Runtime::new().expect("Failed to create Tokio runtime"));
 
+    // Reset shutdown flag for new server start
+    shutdown_flag().store(false, Ordering::Relaxed);
+
     let _ = nogvl(|| {
         runtime.block_on(async {
             let server_details = InitializeResult {
@@ -259,10 +268,50 @@ pub fn start_server() -> String {
             let server: ServerRuntime =
                 server_runtime::create_server(server_details, transport, handler);
 
-            server.start().await
+            // Use select! to wait for either server completion or shutdown signal
+            tokio::select! {
+                result = server.start() => {
+                    result
+                }
+                _ = shutdown_monitor() => {
+                    // Server was requested to shutdown
+                    Ok(())
+                }
+                _ = signal_handler() => {
+                    // System signal received
+                    Ok(())
+                }
+            }
         })
     });
 
+    "Ok".into()
+}
+
+async fn signal_handler() {
+    use tokio::signal;
+
+    let mut sigint = signal::unix::signal(signal::unix::SignalKind::interrupt()).unwrap();
+    let mut sigterm = signal::unix::signal(signal::unix::SignalKind::terminate()).unwrap();
+
+    tokio::select! {
+        _ = sigint.recv() => {},
+        _ = sigterm.recv() => {},
+    }
+}
+
+async fn shutdown_monitor() {
+    let flag = shutdown_flag();
+    loop {
+        if flag.load(Ordering::Relaxed) {
+            break;
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    }
+}
+
+pub fn shutdown_server() -> String {
+    shutdown_flag().store(true, Ordering::Relaxed);
     "Ok".into()
 }
 

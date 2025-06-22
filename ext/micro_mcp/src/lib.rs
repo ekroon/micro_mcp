@@ -7,6 +7,7 @@ use magnus::{function, method, prelude::*, Error, Ruby};
 fn init(ruby: &Ruby) -> Result<(), Error> {
     let native = ruby.define_module("MicroMcpNative")?;
     native.define_singleton_method("start_server", function!(server::start_server, 0))?;
+    native.define_singleton_method("shutdown_server", function!(server::shutdown_server, 0))?;
     native.define_singleton_method("register_tool", function!(server::register_tool, 4))?;
 
     let parent = ruby.define_module("MicroMcp")?;

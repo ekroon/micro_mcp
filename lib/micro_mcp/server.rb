@@ -13,11 +13,11 @@ module MicroMcp
         thread.join
       rescue Interrupt
         puts "\nShutting down server..."
-        thread.kill
+        MicroMcpNative.shutdown_server
+        thread.join
       end
 
       puts "Server stopped."
-      Process.kill("KILL", Process.pid)
     end
   end
 end
