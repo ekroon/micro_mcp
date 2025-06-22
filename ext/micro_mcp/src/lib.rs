@@ -1,5 +1,5 @@
-mod utils;
 mod server;
+mod utils;
 
 use magnus::{function, prelude::*, Error, Ruby};
 

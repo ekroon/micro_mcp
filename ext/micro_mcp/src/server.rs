@@ -40,7 +40,7 @@ fn tools() -> &'static Mutex<HashMap<String, ToolEntry>> {
 }
 
 pub fn register_tool(
-    ruby: &Ruby,
+    _ruby: &Ruby,
     name: String,
     description: Option<String>,
     handler: Proc,
