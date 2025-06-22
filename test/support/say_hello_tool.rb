@@ -3,6 +3,6 @@
 MicroMcp::ToolRegistry.register_tool(
   name: "say_hello_world",
   description: "Prints 'Hello World!' message"
-) do |_request|
+) do
   "Hello World!"
 end

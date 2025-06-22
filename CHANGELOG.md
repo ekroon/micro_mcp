@@ -3,6 +3,7 @@
 ### Added
 - Ruby `ToolRegistry` for registering tools dynamically
 - Access to the MCP runtime from Ruby tools
+- Argument support for tools
 
 ### Changed
 - Gem renamed from `mcp_lite` to `micro_mcp`

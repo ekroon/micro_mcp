@@ -33,8 +33,25 @@ Define one or more tools and start the server:
 ```ruby
 require "micro_mcp"
 
-MicroMcp::ToolRegistry.register_tool(name: "say_hello") do |_request|
+ MicroMcp::ToolRegistry.register_tool(name: "say_hello") do
   "Hello World!"
+end
+
+# Tools can also accept arguments defined using JSON Schema.
+# The arguments hash is provided as the first block parameter.
+ MicroMcp::ToolRegistry.register_tool(
+  name: "add_numbers",
+  description: "Adds two integers",
+  arguments: {
+    "type" => "object",
+    "properties" => {
+      "a" => {"type" => "integer"},
+      "b" => {"type" => "integer"}
+    },
+    "required" => ["a", "b"]
+  }
+) do |args, _runtime|
+  (args["a"] + args["b"]).to_s
 end
 
 MicroMcp.start_server
