@@ -1,11 +1,14 @@
 MicroMcp::ToolRegistry.register_tool(
   name: "create_message_text",
-  description: "invokes runtime.create_message"
-) do |_args, runtime|
+  description: "invokes runtime.create_message",
+  arguments: MicroMcp::Schema.object(
+    question: MicroMcp::Schema.string("question to ask").required
+  )
+) do |args, runtime|
   result = runtime.create_message(
     {
       "messages" => [
-        {"role" => "user", "content" => {"type" => "text", "text" => "What is the capital of France?"}}
+        {"role" => "user", "content" => {"type" => "text", "text" => args["question"]}}
       ],
       "modelPreferences" => {
         "hints" => [{"name" => "claude-3-sonnet"}],
