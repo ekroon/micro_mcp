@@ -346,7 +346,8 @@ mod tests {
     use rust_mcp_sdk::{
         mcp_client::client_runtime,
         schema::{
-            CallToolRequestParams, ClientCapabilities, Implementation, InitializeRequestParams,
+            CallToolRequestParams, ClientCapabilities, CreateMessageRequest, CreateMessageResult,
+            Implementation, InitializeRequestParams, Role, RpcError, TextContent,
             LATEST_PROTOCOL_VERSION,
         },
         McpClient, StdioTransport, TransportOptions,
@@ -355,7 +356,21 @@ mod tests {
 
     struct TestClientHandler;
     #[async_trait]
-    impl rust_mcp_sdk::mcp_client::ClientHandler for TestClientHandler {}
+    impl rust_mcp_sdk::mcp_client::ClientHandler for TestClientHandler {
+        async fn handle_create_message_request(
+            &self,
+            _request: CreateMessageRequest,
+            _runtime: &dyn McpClient,
+        ) -> std::result::Result<CreateMessageResult, RpcError> {
+            Ok(CreateMessageResult {
+                content: TextContent::new("hello".to_string(), None).into(),
+                meta: None,
+                model: "test-model".to_string(),
+                role: Role::Assistant,
+                stop_reason: None,
+            })
+        }
+    }
 
     use rust_mcp_sdk::error::SdkResult;
 
@@ -546,6 +561,47 @@ mod tests {
             .await?;
         let text = result.content[0].as_text_content()?.text.clone();
         assert_eq!(text, "false");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn create_message_exposed() -> SdkResult<()> {
+        let transport = StdioTransport::create_with_server_launch(
+            "ruby",
+            vec![
+                "-I".into(),
+                "../../lib".into(),
+                "../../bin/mcp".into(),
+                "../../test/support/create_message_tool.rb".into(),
+            ],
+            None,
+            TransportOptions::default(),
+        )?;
+
+        let client_details = InitializeRequestParams {
+            capabilities: ClientCapabilities::default(),
+            client_info: Implementation {
+                name: "test-client".into(),
+                version: "0.1.0".into(),
+            },
+            protocol_version: LATEST_PROTOCOL_VERSION.into(),
+        };
+
+        let client = client_runtime::create_client(client_details, transport, TestClientHandler);
+
+        client.clone().start().await?;
+
+        let result = client
+            .call_tool(CallToolRequestParams {
+                name: "create_message_error".into(),
+                arguments: None,
+            })
+            .await?;
+
+        assert!(result.is_error.unwrap_or(false));
+        let text = result.content[0].as_text_content()?.text.clone();
+        assert!(text.contains("missing field"));
 
         Ok(())
     }
