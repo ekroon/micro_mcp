@@ -59,7 +59,31 @@ MicroMcp.start_server
 
 After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake test` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
 
-To install this gem onto your local machine, run `bundle exec rake install`. To release a new version, update the version number in `version.rb`, and then run `bundle exec rake release`, which will create a git tag for the version, push git commits and the created tag, and push the `.gem` file to [rubygems.org](https://rubygems.org).
+To install this gem onto your local machine, run `bundle exec rake install`. 
+
+### Cross-Platform Compilation
+
+This gem uses a GitHub Actions workflow for cross-platform compilation, supporting Linux, macOS, and Windows across multiple Ruby versions. The workflow automatically:
+
+- Cross-compiles the Rust extension for all supported platforms
+- Tests the compiled gems on their target platforms  
+- Publishes to RubyGems on tagged releases
+- Creates GitHub releases with compiled gem artifacts
+
+For detailed information about the cross-compilation setup, see [docs/cross-compilation.md](docs/cross-compilation.md).
+
+### Releasing
+
+To release a new version:
+
+1. Update the version number in `lib/micro_mcp/version.rb`
+2. Commit your changes
+3. Create and push a version tag:
+   ```bash
+   git tag v1.0.0
+   git push origin v1.0.0
+   ```
+4. The GitHub Actions workflow will automatically build, test, and publish the release
 
 ## Contributing
 

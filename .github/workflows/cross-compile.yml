@@ -1,0 +1,186 @@
+---
+name: Cross-compile and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Create release (true/false)'
+        required: false
+        default: 'false'
+        type: string
+
+jobs:
+  ci-data:
+    runs-on: ubuntu-latest
+    outputs:
+      result: ${{ steps.fetch.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oxidize-rb/actions/fetch-ci-data@v1
+        id: fetch
+        with:
+          supported-ruby-platforms: |
+            exclude: []
+          stable-ruby-versions: |
+            exclude: [head]
+
+  cross-compile:
+    name: Compile native gem for ${{ matrix.platform }}
+    runs-on: ubuntu-latest
+    needs: ci-data
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(needs.ci-data.outputs.result).supported-ruby-platforms }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.1"
+          bundler-cache: true
+
+      - name: Cross-compile gem
+        uses: oxidize-rb/actions/cross-gem@v1
+        id: cross-gem
+        with:
+          platform: ${{ matrix.platform }}
+          ruby-versions: ${{ join(fromJSON(needs.ci-data.outputs.result).stable-ruby-versions, ',') }}
+
+      - name: Upload cross-compiled gem
+        uses: actions/upload-artifact@v4
+        with:
+          name: cross-gem-${{ matrix.platform }}
+          path: ${{ steps.cross-gem.outputs.gem-path }}
+          retention-days: 7
+
+  test-native-gems:
+    name: Test native gem on ${{ matrix.platform }} with Ruby ${{ matrix.ruby }}
+    runs-on: ${{ matrix.os }}
+    needs: [ci-data, cross-compile]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Test on Linux
+          - platform: x86_64-linux
+            os: ubuntu-latest
+            ruby: "3.1"
+          - platform: x86_64-linux
+            os: ubuntu-latest
+            ruby: "3.2"
+          - platform: x86_64-linux
+            os: ubuntu-latest
+            ruby: "3.3"
+          # Test on macOS
+          - platform: x86_64-darwin
+            os: macos-13
+            ruby: "3.1"
+          - platform: arm64-darwin
+            os: macos-14
+            ruby: "3.1"
+          # Test on Windows
+          - platform: x64-mingw32
+            os: windows-latest
+            ruby: "3.1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+
+      - name: Download cross-compiled gem
+        uses: actions/download-artifact@v4
+        with:
+          name: cross-gem-${{ matrix.platform }}
+          path: pkg/
+
+      - name: Find gem file
+        id: find-gem
+        shell: bash
+        run: |
+          gem_file=$(find pkg -name "*.gem" | head -1)
+          echo "gem-file=$gem_file" >> $GITHUB_OUTPUT
+          echo "Found gem: $gem_file"
+
+      - name: Install cross-compiled gem
+        run: gem install "${{ steps.find-gem.outputs.gem-file }}"
+
+      - name: Test installed gem
+        run: |
+          ruby -e "require 'micro_mcp'; puts 'Gem loaded successfully'"
+
+  publish:
+    name: Publish to RubyGems
+    runs-on: ubuntu-latest
+    needs: [ci-data, cross-compile, test-native-gems]
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.release == 'true')
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.1"
+          bundler-cache: true
+
+      - name: Download all cross-compiled gems
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cross-gem-*
+          path: pkg/
+          merge-multiple: true
+
+      - name: List generated gems
+        run: ls -la pkg/
+
+      - name: Publish to RubyGems
+        env:
+          GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_AUTH_TOKEN }}
+        run: |
+          # Configure gem credentials
+          mkdir -p ~/.gem
+          cat > ~/.gem/credentials << EOF
+          ---
+          :rubygems_api_key: ${GEM_HOST_API_KEY}
+          EOF
+          chmod 0600 ~/.gem/credentials
+          
+          # Push all cross-compiled gems
+          for gem in pkg/*.gem; do
+            echo "Publishing $gem"
+            gem push "$gem"
+          done
+
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [publish]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all cross-compiled gems
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cross-gem-*
+          path: release-assets/
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*.gem
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref, '-') }}
