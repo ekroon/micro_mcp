@@ -1,0 +1,64 @@
+name: Version Check
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  version-check:
+    runs-on: ubuntu-latest
+    name: Check gem version against RubyGems
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4.1'
+          bundler-cache: false
+      
+      - name: Get current gem version
+        id: current-version
+        run: |
+          current_version=$(ruby -r "./lib/micro_mcp/version" -e "puts MicroMcp::VERSION")
+          echo "version=$current_version" >> $GITHUB_OUTPUT
+          echo "Current gem version: $current_version"
+      
+      - name: Get published RubyGems version
+        id: published-version
+        run: |
+          published_version=$(curl -s https://rubygems.org/api/v1/gems/micro_mcp.json | jq -r '.version // "not-published"')
+          echo "version=$published_version" >> $GITHUB_OUTPUT
+          echo "Published RubyGems version: $published_version"
+      
+      - name: Compare versions
+        run: |
+          current="${{ steps.current-version.outputs.version }}"
+          published="${{ steps.published-version.outputs.version }}"
+          
+          echo "📋 Version Status Report"
+          echo "========================"
+          echo "Current version in repo: $current"
+          echo "Published on RubyGems:   $published"
+          echo ""
+          
+          if [ "$published" = "not-published" ]; then
+            echo "🆕 This gem has not been published to RubyGems yet."
+            echo "   Ready to publish version $current when appropriate."
+          elif [ "$current" = "$published" ]; then
+            echo "✅ Versions match! No action needed unless preparing a new release."
+            echo "   💡 If preparing a new release, remember to bump the version in lib/micro_mcp/version.rb"
+          else
+            echo "🔄 Version mismatch detected:"
+            echo "   - If developing new features: This is normal during development"
+            echo "   - If ready to release: Run 'bundle exec rake release' to publish version $current"
+            echo "   - If version should match published: Consider if version needs to be updated"
+          fi
+          echo ""
+          echo "📚 Release Process Reminder:"
+          echo "   1. Update version in lib/micro_mcp/version.rb"
+          echo "   2. Update CHANGELOG.md with new version details"
+          echo "   3. Run 'bundle exec rake release' to build, tag, and publish"
