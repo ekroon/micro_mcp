@@ -138,6 +138,31 @@ impl<'a> RubyMcpServer<'a> {
     pub fn client_supports_sampling(&self) -> Result<Option<bool>, Error> {
         Ok(self.runtime()?.client_supports_sampling())
     }
+
+    pub fn create_message(&self, params: Value) -> Result<Value, Error> {
+        let ruby = Ruby::get().unwrap();
+        let runtime = self.runtime()?;
+        let json_value = ruby_value_to_json_value(&ruby, params)?;
+        let request_params: rust_mcp_sdk::schema::CreateMessageRequestParams =
+            serde_json::from_value(json_value)
+                .map_err(|e| Error::new(ruby.exception_runtime_error(), e.to_string()))?;
+
+        let runtime_handle = RUNTIME.get().expect("Tokio not initialised");
+        let handle = runtime_handle.handle();
+
+        let result = if tokio::runtime::Handle::try_current().is_ok() {
+            tokio::task::block_in_place(|| {
+                handle.block_on(async { runtime.create_message(request_params).await })
+            })
+        } else {
+            handle.block_on(async { runtime.create_message(request_params).await })
+        }
+        .map_err(|e| Error::new(ruby.exception_runtime_error(), e.to_string()))?;
+
+        let json_result = serde_json::to_value(result)
+            .map_err(|e| Error::new(ruby.exception_runtime_error(), e.to_string()))?;
+        json_value_to_ruby_value(&ruby, &json_result)
+    }
 }
 
 pub fn register_tool(
@@ -321,7 +346,8 @@ mod tests {
     use rust_mcp_sdk::{
         mcp_client::client_runtime,
         schema::{
-            CallToolRequestParams, ClientCapabilities, Implementation, InitializeRequestParams,
+            CallToolRequestParams, ClientCapabilities, CreateMessageRequest, CreateMessageResult,
+            Implementation, InitializeRequestParams, Role, RpcError, TextContent,
             LATEST_PROTOCOL_VERSION,
         },
         McpClient, StdioTransport, TransportOptions,
@@ -330,7 +356,21 @@ mod tests {
 
     struct TestClientHandler;
     #[async_trait]
-    impl rust_mcp_sdk::mcp_client::ClientHandler for TestClientHandler {}
+    impl rust_mcp_sdk::mcp_client::ClientHandler for TestClientHandler {
+        async fn handle_create_message_request(
+            &self,
+            _request: CreateMessageRequest,
+            _runtime: &dyn McpClient,
+        ) -> std::result::Result<CreateMessageResult, RpcError> {
+            Ok(CreateMessageResult {
+                content: TextContent::new("hello".to_string(), None).into(),
+                meta: None,
+                model: "test-model".to_string(),
+                role: Role::Assistant,
+                stop_reason: None,
+            })
+        }
+    }
 
     use rust_mcp_sdk::error::SdkResult;
 
@@ -521,6 +561,47 @@ mod tests {
             .await?;
         let text = result.content[0].as_text_content()?.text.clone();
         assert_eq!(text, "false");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn create_message_exposed() -> SdkResult<()> {
+        let transport = StdioTransport::create_with_server_launch(
+            "ruby",
+            vec![
+                "-I".into(),
+                "../../lib".into(),
+                "../../bin/mcp".into(),
+                "../../test/support/create_message_tool.rb".into(),
+            ],
+            None,
+            TransportOptions::default(),
+        )?;
+
+        let client_details = InitializeRequestParams {
+            capabilities: ClientCapabilities::default(),
+            client_info: Implementation {
+                name: "test-client".into(),
+                version: "0.1.0".into(),
+            },
+            protocol_version: LATEST_PROTOCOL_VERSION.into(),
+        };
+
+        let client = client_runtime::create_client(client_details, transport, TestClientHandler);
+
+        client.clone().start().await?;
+
+        let result = client
+            .call_tool(CallToolRequestParams {
+                name: "create_message_error".into(),
+                arguments: None,
+            })
+            .await?;
+
+        assert!(result.is_error.unwrap_or(false));
+        let text = result.content[0].as_text_content()?.text.clone();
+        assert!(text.contains("missing field"));
 
         Ok(())
     }
