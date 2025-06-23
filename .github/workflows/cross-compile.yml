@@ -39,11 +39,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
+      - name: Set up Ruby & Rust
+        uses: oxidize-rb/actions/setup-ruby-and-rust@v1
         with:
           ruby-version: "3.1"
           bundler-cache: true
+          cargo-cache: true
+          rubygems: '3.6.2'
 
       - name: Cross-compile gem
         uses: oxidize-rb/actions/cross-gem@v1
@@ -91,10 +93,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
+      - name: Set up Ruby & Rust
+        uses: oxidize-rb/actions/setup-ruby-and-rust@v1
         with:
           ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+          cargo-cache: true
+          rubygems: '3.6.2'
 
       - name: Download cross-compiled gem
         uses: actions/download-artifact@v4
@@ -126,11 +131,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
+      - name: Set up Ruby & Rust
+        uses: oxidize-rb/actions/setup-ruby-and-rust@v1
         with:
           ruby-version: "3.1"
           bundler-cache: true
+          cargo-cache: true
+          rubygems: '3.6.2'
 
       - name: Download all cross-compiled gems
         uses: actions/download-artifact@v4
