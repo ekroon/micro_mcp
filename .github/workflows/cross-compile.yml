@@ -33,12 +33,19 @@ jobs:
           bundler-cache: true
           cargo-cache: true
           
+      - name: Install cross-compilation dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-11 g++-11
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 60
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 60
+          
       - name: Build gem for platform
         run: |
           bundle install
-          bundle exec rake --tasks
           # Use native compilation for all platforms
-          bundle exec rake build
+          bundle exec rake native:micro_mcp:${{ matrix.target }}
           # List created files for debugging
           echo "Files in pkg directory:"
           ls -la pkg/ || echo "No pkg directory found"
