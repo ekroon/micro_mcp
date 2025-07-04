@@ -33,19 +33,33 @@ jobs:
           bundler-cache: true
           cargo-cache: true
           
-      - name: Install cross-compilation dependencies
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-11 g++-11
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 60
-          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 60
-          
       - name: Build gem for platform
         run: |
           bundle install
           bundle exec rake --tasks
-          bundle exec rake native:micro_mcp:${{ matrix.target }}
+          # Use native compilation for all platforms
+          bundle exec rake build
+          # List created files for debugging
+          echo "Files in pkg directory:"
+          ls -la pkg/ || echo "No pkg directory found"
+
+      - name: Rename gem with platform suffix
+        run: |
+          # Find the created gem and rename it to include platform suffix
+          if [ -f pkg/micro_mcp-*.gem ]; then
+            for gem in pkg/micro_mcp-*.gem; do
+              # Extract version from existing gem name
+              version=$(echo "$gem" | sed 's/.*micro_mcp-\(.*\)\.gem/\1/')
+              # Create new name with platform suffix
+              new_name="pkg/micro_mcp-${version}-${{ matrix.platform }}.gem"
+              mv "$gem" "$new_name"
+              echo "Renamed $gem to $new_name"
+              ls -la pkg/
+            done
+          else
+            echo "No gem files found to rename"
+            ls -la pkg/
+          fi
           
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
