@@ -16,7 +16,7 @@ jobs:
             target: x86_64-linux
           - os: macos-13
             platform: x86_64-darwin
-            target: x86_64-darwin
+            target: x86_64-darwin22
           - os: macos-latest
             platform: arm64-darwin
             target: arm64-darwin23
