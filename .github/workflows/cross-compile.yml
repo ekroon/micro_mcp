@@ -46,7 +46,7 @@ jobs:
           bundle exec rake native:micro_mcp:${{ matrix.platform }}
           
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: gem-${{ matrix.platform }}
           path: pkg/*-${{ matrix.platform }}.gem
