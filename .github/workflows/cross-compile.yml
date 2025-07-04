@@ -45,7 +45,7 @@ jobs:
         run: |
           bundle install
           # Use native compilation for all platforms
-          bundle exec rake native:micro_mcp:${{ matrix.target }}
+          bundle exec rake build_binary
           # List created files for debugging
           echo "Files in pkg directory:"
           ls -la pkg/ || echo "No pkg directory found"
