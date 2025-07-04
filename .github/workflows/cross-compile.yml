@@ -13,12 +13,13 @@ jobs:
         include:
           - os: ubuntu-latest
             platform: x86_64-linux
-          - os: ubuntu-latest  
-            platform: aarch64-linux
+            target: x86_64-linux
           - os: macos-latest
             platform: x86_64-darwin
+            target: x86_64-darwin23
           - os: macos-latest
             platform: arm64-darwin
+            target: arm64-darwin23
 
     runs-on: ${{ matrix.os }}
     
@@ -43,7 +44,8 @@ jobs:
       - name: Build gem for platform
         run: |
           bundle install
-          bundle exec rake native:micro_mcp:${{ matrix.platform }}
+          bundle exec rake --tasks
+          bundle exec rake native:micro_mcp:${{ matrix.target }}
           
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
