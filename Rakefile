@@ -35,4 +35,37 @@ task :lint_rust do
   end
 end
 
+desc "Build binary gem with compiled extension"
+task :build_binary do
+  # First compile the extension
+  Rake::Task[:compile].invoke
+  
+  # Create a modified gemspec that includes the compiled extension
+  spec = GEMSPEC.dup
+  
+  # Get the current platform
+  platform = Gem::Platform.local.to_s
+  spec.platform = platform
+  
+  # Add the compiled extension to the files list
+  compiled_files = Dir.glob("lib/**/*.{bundle,so,dylib}")
+  spec.files += compiled_files
+  
+  # Remove the extension requirement since we're including the compiled version
+  spec.extensions = []
+  
+  # Build the gem
+  gem_file = "pkg/#{spec.full_name}.gem"
+  FileUtils.mkdir_p("pkg")
+  
+  puts "Building binary gem: #{gem_file}"
+  puts "Platform: #{platform}"
+  puts "Compiled files: #{compiled_files}"
+  
+  Gem::Package.build(spec)
+  FileUtils.mv("#{spec.full_name}.gem", gem_file)
+  
+  puts "Built #{gem_file}"
+end
+
 task default: %i[compile test test_rust lint_rust standard]
