@@ -1,7 +1,16 @@
 # frozen_string_literal: true
 
 require_relative "micro_mcp/version"
-require_relative "micro_mcp/micro_mcp"
+ruby_version = "#{RUBY_VERSION[/\d+\.\d+/]}"
+begin
+  require_relative "micro_mcp/micro_mcp"
+rescue LoadError
+  begin
+    require_relative "micro_mcp/#{ruby_version}/micro_mcp"
+  rescue LoadError
+    raise LoadError, "No native extension found for Ruby #{ruby_version}"
+  end
+end
 require_relative "micro_mcp/schema"
 require_relative "micro_mcp/tool_registry"
 require_relative "micro_mcp/server"

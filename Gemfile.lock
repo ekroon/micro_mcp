@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    micro_mcp (0.1.2)
+    micro_mcp (0.1.4)
       rb_sys (~> 0.9.116)
 
 GEM
