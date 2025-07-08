@@ -4,7 +4,7 @@ use rust_mcp_sdk::{
     schema::{
         schema_utils::CallToolError, CallToolRequest, CallToolResult, Implementation,
         InitializeResult, ListToolsRequest, ListToolsResult, RpcError, ServerCapabilities,
-        ServerCapabilitiesTools, Tool, ToolInputSchema, LATEST_PROTOCOL_VERSION,
+        ServerCapabilitiesTools, TextContent, Tool, ToolInputSchema, LATEST_PROTOCOL_VERSION,
     },
     McpServer, StdioTransport, TransportOptions,
 };
@@ -184,7 +184,10 @@ pub fn register_tool(
         annotations: None,
         description,
         input_schema: schema,
+        meta: None,
         name: name.clone(),
+        output_schema: None,
+        title: None,
     };
 
     let handler_fn = RubyHandler(handler);
@@ -257,7 +260,9 @@ impl ServerHandler for MyServerHandler {
                 });
                 wrapper.invalidate();
                 match text_result {
-                    Ok(text) => Ok(CallToolResult::text_content(text, None)),
+                    Ok(text) => Ok(CallToolResult::text_content(vec![TextContent::new(
+                        text, None, None,
+                    )])),
                     Err(e) => Err(CallToolError::new(std::io::Error::other(e.to_string()))),
                 }
             }
@@ -277,6 +282,7 @@ pub fn start_server() -> String {
             let server_details = InitializeResult {
                 server_info: Implementation {
                     name: "Hello World MCP Server".to_string(),
+                    title: None,
                     version: "0.1.0".to_string(),
                 },
                 capabilities: ServerCapabilities {
@@ -363,7 +369,7 @@ mod tests {
             _runtime: &dyn McpClient,
         ) -> std::result::Result<CreateMessageResult, RpcError> {
             Ok(CreateMessageResult {
-                content: TextContent::new("hello".to_string(), None).into(),
+                content: TextContent::new("hello".to_string(), None, None).into(),
                 meta: None,
                 model: "test-model".to_string(),
                 role: Role::Assistant,
@@ -392,6 +398,7 @@ mod tests {
             capabilities: ClientCapabilities::default(),
             client_info: Implementation {
                 name: "test-client".into(),
+                title: None,
                 version: "0.1.0".into(),
             },
             protocol_version: LATEST_PROTOCOL_VERSION.into(),
@@ -434,6 +441,7 @@ mod tests {
             capabilities: ClientCapabilities::default(),
             client_info: Implementation {
                 name: "test-client".into(),
+                title: None,
                 version: "0.1.0".into(),
             },
             protocol_version: LATEST_PROTOCOL_VERSION.into(),
@@ -490,6 +498,7 @@ mod tests {
             capabilities: ClientCapabilities::default(),
             client_info: Implementation {
                 name: "test-client".into(),
+                title: None,
                 version: "0.1.0".into(),
             },
             protocol_version: LATEST_PROTOCOL_VERSION.into(),
@@ -544,6 +553,7 @@ mod tests {
             capabilities: ClientCapabilities::default(),
             client_info: Implementation {
                 name: "test-client".into(),
+                title: None,
                 version: "0.1.0".into(),
             },
             protocol_version: LATEST_PROTOCOL_VERSION.into(),
@@ -583,6 +593,7 @@ mod tests {
             capabilities: ClientCapabilities::default(),
             client_info: Implementation {
                 name: "test-client".into(),
+                title: None,
                 version: "0.1.0".into(),
             },
             protocol_version: LATEST_PROTOCOL_VERSION.into(),

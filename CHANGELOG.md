@@ -11,6 +11,7 @@
 - Gem renamed from `mcp_lite` to `micro_mcp`
 - Tool handling uses a dynamic registry
 - Improved server error handling
+- Updated dependency `rust-mcp-sdk` to 0.5.0
 
 ## [0.1.0] - 2025-06-17
 
