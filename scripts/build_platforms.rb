@@ -19,7 +19,7 @@ end
 
 def main
   puts "Building MicroMcp gem for multiple platforms..."
-  puts "Platforms: #{PLATFORMS.join(', ')}"
+  puts "Platforms: #{PLATFORMS.join(", ")}"
   puts "Ruby versions: #{RUBY_VERSIONS}"
   puts
 

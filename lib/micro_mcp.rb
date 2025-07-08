@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "micro_mcp/version"
-ruby_version = "#{RUBY_VERSION[/\d+\.\d+/]}"
+ruby_version = RUBY_VERSION[/\d+\.\d+/].to_s
 begin
   require_relative "micro_mcp/micro_mcp"
 rescue LoadError
