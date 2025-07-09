@@ -2,9 +2,11 @@ use async_trait::async_trait;
 use rust_mcp_sdk::{
     mcp_server::{server_runtime, ServerHandler, ServerRuntime},
     schema::{
-        schema_utils::CallToolError, CallToolRequest, CallToolResult, Implementation,
-        InitializeResult, ListToolsRequest, ListToolsResult, RpcError, ServerCapabilities,
-        ServerCapabilitiesTools, TextContent, Tool, ToolInputSchema, LATEST_PROTOCOL_VERSION,
+        schema_utils::CallToolError, CallToolRequest, CallToolResult, GetPromptRequest,
+        GetPromptResult, Implementation, InitializeResult, ListPromptsRequest, ListPromptsResult,
+        ListToolsRequest, ListToolsResult, Prompt, PromptArgument, PromptMessage, RpcError,
+        ServerCapabilities, ServerCapabilitiesPrompts, ServerCapabilitiesTools, TextContent, Tool,
+        ToolInputSchema, LATEST_PROTOCOL_VERSION,
     },
     McpServer, StdioTransport, TransportOptions,
 };
@@ -45,8 +47,20 @@ struct ToolEntry {
 
 static TOOLS: OnceLock<Mutex<HashMap<String, ToolEntry>>> = OnceLock::new();
 
+#[derive(Clone)]
+struct PromptEntry {
+    prompt: Prompt,
+    handler: RubyHandler,
+}
+
+static PROMPTS: OnceLock<Mutex<HashMap<String, PromptEntry>>> = OnceLock::new();
+
 fn tools() -> &'static Mutex<HashMap<String, ToolEntry>> {
     TOOLS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn prompts() -> &'static Mutex<HashMap<String, PromptEntry>> {
+    PROMPTS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn ruby_value_to_json_value(ruby: &Ruby, val: Value) -> Result<JsonValue, Error> {
@@ -93,6 +107,36 @@ fn parse_tool_input_schema(json: JsonValue) -> ToolInputSchema {
         ToolInputSchema::new(required, properties)
     } else {
         ToolInputSchema::new(Vec::new(), None)
+    }
+}
+
+fn parse_prompt_arguments(json: JsonValue) -> Vec<PromptArgument> {
+    match json {
+        JsonValue::Array(items) => items
+            .into_iter()
+            .filter_map(|item| match item {
+                JsonValue::Object(map) => {
+                    let name = map.get("name")?.as_str()?.to_string();
+                    let description = map
+                        .get("description")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let required = map.get("required").and_then(|v| v.as_bool());
+                    let title = map
+                        .get("title")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    Some(PromptArgument {
+                        description,
+                        name,
+                        required,
+                        title,
+                    })
+                }
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -205,10 +249,121 @@ pub fn register_tool(
     Ok(())
 }
 
+pub fn register_prompt(
+    ruby: &Ruby,
+    name: String,
+    description: Option<String>,
+    arguments: Option<Value>,
+    handler: Proc,
+) -> Result<(), Error> {
+    let parsed_args = match arguments {
+        Some(val) => {
+            let json = ruby_value_to_json_value(ruby, val)?;
+            parse_prompt_arguments(json)
+        }
+        None => Vec::new(),
+    };
+
+    let prompt = Prompt {
+        arguments: parsed_args,
+        description,
+        meta: None,
+        name: name.clone(),
+        title: None,
+    };
+
+    let entry = PromptEntry {
+        prompt,
+        handler: RubyHandler(handler),
+    };
+
+    let mut map = prompts()
+        .lock()
+        .map_err(|_| Error::new(ruby.exception_runtime_error(), "prompts mutex poisoned"))?;
+    map.insert(name, entry);
+    Ok(())
+}
+
 pub struct MyServerHandler;
 
 #[async_trait]
 impl ServerHandler for MyServerHandler {
+    async fn handle_list_prompts_request(
+        &self,
+        _request: ListPromptsRequest,
+        _runtime: &dyn McpServer,
+    ) -> Result<ListPromptsResult, RpcError> {
+        let prompts = {
+            let map = prompts().lock().map_err(|_| {
+                RpcError::internal_error().with_message("prompts mutex poisoned".to_string())
+            })?;
+            map.values().map(|p| p.prompt.clone()).collect()
+        };
+        Ok(ListPromptsResult {
+            prompts,
+            meta: None,
+            next_cursor: None,
+        })
+    }
+
+    async fn handle_get_prompt_request(
+        &self,
+        request: GetPromptRequest,
+        runtime: &dyn McpServer,
+    ) -> Result<GetPromptResult, RpcError> {
+        let map = prompts().lock().map_err(|_| {
+            RpcError::internal_error().with_message("prompts mutex poisoned".to_string())
+        })?;
+        match map.get(&request.params.name) {
+            Some(entry) => {
+                let proc = entry.handler.0;
+                let wrapper = RubyMcpServer::new(runtime);
+                let args_value = if let Some(map) = &request.params.arguments {
+                    let json = JsonValue::Object(
+                        map.iter()
+                            .map(|(k, v)| (k.clone(), JsonValue::String(v.clone())))
+                            .collect(),
+                    );
+                    Some(
+                        crate::utils::with_gvl(|| {
+                            let ruby = Ruby::get().unwrap();
+                            json_value_to_ruby_value(&ruby, &json)
+                        })
+                        .map_err(|e: Error| {
+                            RpcError::internal_error().with_message(e.to_string())
+                        })?,
+                    )
+                } else {
+                    None
+                };
+                let msg_value: Result<Value, Error> = crate::utils::with_gvl(|| {
+                    let ruby = Ruby::get().unwrap();
+                    let args = args_value.unwrap_or_else(|| ruby.qnil().as_value());
+                    proc.call::<_, Value>((args, wrapper.clone()))
+                });
+                wrapper.invalidate();
+                let json = msg_value
+                    .map_err(|e| RpcError::internal_error().with_message(e.to_string()))
+                    .and_then(|val| {
+                        crate::utils::with_gvl(|| {
+                            let ruby = Ruby::get().unwrap();
+                            ruby_value_to_json_value(&ruby, val)
+                        })
+                        .map_err(|e: Error| RpcError::internal_error().with_message(e.to_string()))
+                    })?;
+
+                let msgs: Vec<PromptMessage> = serde_json::from_value(json)
+                    .map_err(|e| RpcError::internal_error().with_message(e.to_string()))?;
+
+                Ok(GetPromptResult {
+                    description: entry.prompt.description.clone(),
+                    messages: msgs,
+                    meta: None,
+                })
+            }
+            None => Err(RpcError::invalid_params().with_message("Unknown prompt".to_string())),
+        }
+    }
     async fn handle_list_tools_request(
         &self,
         _request: ListToolsRequest,
@@ -287,6 +442,7 @@ pub fn start_server() -> String {
                 },
                 capabilities: ServerCapabilities {
                     tools: Some(ServerCapabilitiesTools { list_changed: None }),
+                    prompts: Some(ServerCapabilitiesPrompts { list_changed: None }),
                     ..Default::default()
                 },
                 meta: None,
@@ -353,8 +509,8 @@ mod tests {
         mcp_client::client_runtime,
         schema::{
             CallToolRequestParams, ClientCapabilities, CreateMessageRequest, CreateMessageResult,
-            Implementation, InitializeRequestParams, Role, RpcError, TextContent,
-            LATEST_PROTOCOL_VERSION,
+            GetPromptRequestParams, Implementation, InitializeRequestParams, Role, RpcError,
+            TextContent, LATEST_PROTOCOL_VERSION,
         },
         McpClient, StdioTransport, TransportOptions,
     };
@@ -613,6 +769,62 @@ mod tests {
         assert!(result.is_error.unwrap_or(false));
         let text = result.content[0].as_text_content()?.text.clone();
         assert!(text.contains("missing field"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn prompts_feature_works() -> SdkResult<()> {
+        let transport = StdioTransport::create_with_server_launch(
+            "ruby",
+            vec![
+                "-I".into(),
+                "../../lib".into(),
+                "../../bin/mcp".into(),
+                "../../test/support/prompt_example.rb".into(),
+            ],
+            None,
+            TransportOptions::default(),
+        )?;
+
+        let client_details = InitializeRequestParams {
+            capabilities: ClientCapabilities::default(),
+            client_info: Implementation {
+                name: "test-client".into(),
+                title: None,
+                version: "0.1.0".into(),
+            },
+            protocol_version: LATEST_PROTOCOL_VERSION.into(),
+        };
+
+        let client = client_runtime::create_client(client_details, transport, TestClientHandler);
+
+        client.clone().start().await?;
+
+        // list prompts
+        let result = client.list_prompts(None).await?;
+        assert_eq!(result.prompts.len(), 1);
+        assert_eq!(result.prompts[0].name, "greeting");
+
+        // get prompt
+        let get_res = client
+            .get_prompt(GetPromptRequestParams {
+                name: "greeting".into(),
+                arguments: Some(
+                    [("name".to_string(), "Codex".to_string())]
+                        .into_iter()
+                        .collect(),
+                ),
+            })
+            .await?;
+        assert_eq!(get_res.messages.len(), 2);
+        let text = get_res.messages[0]
+            .content
+            .as_text_content()
+            .unwrap()
+            .text
+            .clone();
+        assert_eq!(text, "Hello Codex");
 
         Ok(())
     }
