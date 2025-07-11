@@ -9,7 +9,9 @@ PR.register_prompt(
     {name: "name", description: "Name to greet"}
   ]
 ) do |args, runtime|
-  runtime.is_initialized
+  unless runtime.is_initialized
+    raise "Runtime is not initialized"
+  end
   name = args["name"] || "world"
   [
     {"role" => "user", "content" => {"type" => "text", "text" => "Hello #{name}"}},
