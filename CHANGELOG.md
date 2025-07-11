@@ -13,6 +13,7 @@
 - Tool handling uses a dynamic registry
 - Improved server error handling
 - Updated dependency `rust-mcp-sdk` to 0.5.0
+- Rooted stored Ruby `Proc` objects to avoid GC issues
 
 ## [0.1.0] - 2025-06-17
 
