@@ -64,3 +64,34 @@ cargo metadata --format-version 1 --no-deps \
    - Memory management between Rust and Ruby
    - Proper error handling across language boundaries
    - Thread safety considerations
+
+## Ruby & Rust GC Rules
+
+- Ruby's GC can't see values stored in ordinary Rust memory. Anything kept in a
+  `Vec`, `HashMap`, `OnceCell`, or static variable must be rooted or pinned.
+- Use `value::BoxValue<T>` to pin individual Ruby `Value`s. `BoxValue::new` will
+  `rb_gc_register_address` the object so it stays valid.
+- Expose Rust structs to Ruby with `#[magnus::wrap]`/`#[derive(TypedData)]` and
+  `Obj<T>`. `Obj<T>` is just a typed handle, so wrap it again in `BoxValue` (or
+  register it) if you keep it on the Rust side.
+- For containers of many Ruby values, wrap the container itself in a `TypedData`
+  struct and implement a `mark` method to mark each entry. Root that single
+  wrapper instead of each entry.
+- When using globals, prefer a wrapper similar to:
+
+  ```rust
+  static REG: OnceCell<Obj<Registry>> = OnceCell::new();
+  let reg = REG.get_or_init(|| {
+      let obj = Obj::wrap(Registry::new());
+      magnus::gc::register_mark_object(obj); // root the wrapper
+      obj
+  });
+  ```
+
+## Testing Checklist
+
+1. Call `GC.start` and `GC.compact` after each Ruby call in tests to stress the
+   garbage collector.
+2. Run `cargo miri` (or valgrind) to detect use-after-free in unsafe code.
+3. Remember `Obj<T>` is not `Send`/`Sync`; `BoxValue<T>` is. Convert or guard
+   before crossing threads.
