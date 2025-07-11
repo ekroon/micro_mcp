@@ -14,7 +14,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use tokio::runtime::Runtime;
 
-use magnus::{block::Proc, value::ReprValue, Error, Ruby, Value};
+use magnus::{
+    block::Proc,
+    value::{BoxValue, ReprValue},
+    Error, Ruby, Value,
+};
 use magnus::{typed_data::DataTypeFunctions, TypedData};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -30,8 +34,13 @@ fn shutdown_flag() -> &'static Arc<AtomicBool> {
 
 type ToolHandler = RubyHandler;
 
-#[derive(Clone)]
-struct RubyHandler(Proc);
+struct RubyHandler(BoxValue<Proc>);
+
+impl Clone for RubyHandler {
+    fn clone(&self) -> Self {
+        RubyHandler(BoxValue::new(*self.0.as_ref()))
+    }
+}
 
 // SAFETY: We only call the stored Proc while holding the GVL.
 unsafe impl Send for RubyHandler {}
@@ -190,7 +199,7 @@ pub fn register_tool(
         title: None,
     };
 
-    let handler_fn = RubyHandler(handler);
+    let handler_fn = RubyHandler(BoxValue::new(handler));
 
     let mut map = tools()
         .lock()
@@ -237,7 +246,7 @@ impl ServerHandler for MyServerHandler {
             .map_err(|_| CallToolError::new(std::io::Error::other("tools mutex poisoned")))?;
         match map.get(request.tool_name()) {
             Some(entry) => {
-                let proc = entry.handler.0;
+                let proc = *entry.handler.0.as_ref();
                 let wrapper = RubyMcpServer::new(runtime);
                 let args_value = if let Some(map) = &request.params.arguments {
                     let json = JsonValue::Object(map.clone());
