@@ -9,6 +9,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_singleton_method("start_server", function!(server::start_server, 0))?;
     native.define_singleton_method("shutdown_server", function!(server::shutdown_server, 0))?;
     native.define_singleton_method("register_tool", function!(server::register_tool, 4))?;
+    native.define_singleton_method("register_prompt", function!(server::register_prompt, 4))?;
 
     let parent = ruby.define_module("MicroMcp")?;
     let class = parent.define_class("Runtime", ruby.class_object())?;

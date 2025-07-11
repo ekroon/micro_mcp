@@ -6,6 +6,7 @@
 - Argument support for tools
 - Exposed `client_supports_sampling` on runtime
 - Exposed `create_message` on runtime
+- Prompt registry for registering prompts with arguments and runtime access
 
 ### Changed
 - Gem renamed from `mcp_lite` to `micro_mcp`
